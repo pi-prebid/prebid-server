@@ -9,6 +9,8 @@ import (
 	"github.com/prebid/prebid-server/hooks"
 )
 
+//go:generate go run ./generator/buildergen.go
+
 func NewBuilder() Builder {
 	return &builder{builders()}
 }
