@@ -318,9 +318,9 @@ func (t *TCF2) BasicEnforcementVendor(openrtb_ext.BidderName) bool {
 	return false
 }
 
-// IntegrationEnabled checks if a given integration type is enabled. All integration types are considered either
+// ChannelEnabled checks if a given channel type is enabled. All channel types are considered either
 // enabled or disabled based on the Enabled flag.
-func (t *TCF2) IntegrationEnabled(integrationType IntegrationType) bool {
+func (t *TCF2) ChannelEnabled(channelType ChannelType) bool {
 	return t.Enabled
 }
 
@@ -1070,6 +1070,8 @@ func SetupViper(v *viper.Viper, filename string, bidderInfos BidderInfos) {
 	v.SetDefault("experiment.adscert.inprocess.domain_renewal_interval_seconds", 30)
 	v.SetDefault("experiment.adscert.remote.url", "")
 	v.SetDefault("experiment.adscert.remote.signing_timeout_ms", 5)
+
+	v.SetDefault("hooks.enabled", false)
 
 	for bidderName := range bidderInfos {
 		setBidderDefaults(v, strings.ToLower(bidderName))
