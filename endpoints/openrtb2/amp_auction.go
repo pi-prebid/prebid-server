@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/prebid/prebid-server/hooks/hookexecution"
-	"github.com/prebid/prebid-server/hooks/hookstage"
 	"net/http"
 	"net/url"
 	"strings"
@@ -126,12 +124,6 @@ func (deps *endpointDeps) AmpAuction(w http.ResponseWriter, r *http.Request, _ h
 		RequestStatus: metrics.RequestStatusOK,
 	}
 
-	hookExecutor := hookexecution.HookExecutor{
-		InvocationCtx: &hookstage.InvocationContext{},
-		Endpoint:      hookexecution.Amp_endpoint,
-		PlanBuilder:   deps.hookExecutionPlanBuilder,
-		MetricEngine:  deps.metricsEngine,
-	}
 	defer func() {
 		deps.metricsEngine.RecordRequest(labels)
 		deps.metricsEngine.RecordRequestTime(labels, time.Since(start))
@@ -152,12 +144,11 @@ func (deps *endpointDeps) AmpAuction(w http.ResponseWriter, r *http.Request, _ h
 	w.Header().Set("Access-Control-Expose-Headers", "AMP-Access-Control-Allow-Source-Origin")
 	w.Header().Set("X-Prebid", version.BuildXPrebidHeader(version.Ver))
 
-	// todo: use stage result later for response
-	_, _, rejectErr := hookExecutor.ExecuteEntrypointStage(r, nil)
-	if rejectErr != nil {
-		//todo: return no bid response
-		// the only error returned from above is hook stage rejection
+	if _, reject := deps.hookExecutor.ExecuteEntrypointStage(r, nil); reject != nil {
+		rejectAmpRequest(*reject, w, nil, &labels, &ao, nil)
+		return
 	}
+
 	reqWrapper, storedAuctionResponses, storedBidResponses, bidderImpReplaceImp, errL := deps.parseAmpRequest(r)
 	ao.Errors = append(ao.Errors, errL...)
 
@@ -167,11 +158,6 @@ func (deps *endpointDeps) AmpAuction(w http.ResponseWriter, r *http.Request, _ h
 			w.Write([]byte(fmt.Sprintf("Invalid request: %s\n", err.Error())))
 		}
 		labels.RequestStatus = metrics.RequestStatusBadInput
-		return
-	}
-
-	if reject := hookexecution.FindReject(errL); reject != nil {
-		rejectAmpRequest(*reject, w, reqWrapper, &labels, &ao, errL)
 		return
 	}
 
@@ -288,6 +274,7 @@ func rejectAmpRequest(
 
 	if ao != nil {
 		ao.AuctionResponse = response
+		ao.Errors = append(ao.Errors, reject)
 	}
 
 	sendAmpResponse(w, response, reqWrapper, labels, ao, errs)

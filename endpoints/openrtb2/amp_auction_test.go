@@ -14,12 +14,14 @@ import (
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/prebid/openrtb/v17/openrtb2"
+	"github.com/prebid/openrtb/v17/openrtb3"
 	"github.com/prebid/prebid-server/amp"
 	"github.com/prebid/prebid-server/analytics"
 	analyticsConf "github.com/prebid/prebid-server/analytics/config"
 	"github.com/prebid/prebid-server/config"
 	"github.com/prebid/prebid-server/exchange"
 	"github.com/prebid/prebid-server/hooks"
+	"github.com/prebid/prebid-server/hooks/hookexecution"
 	metricsConfig "github.com/prebid/prebid-server/metrics/config"
 	"github.com/prebid/prebid-server/openrtb_ext"
 	"github.com/prebid/prebid-server/stored_requests/backends/empty_fetcher"
@@ -1927,5 +1929,71 @@ func TestSetTargeting(t *testing.T) {
 			assert.JSONEq(t, test.expectedImpExt, string(req.Imp[0].Ext), "incorrect impression extension returned for test %s", test.description)
 		}
 
+	}
+}
+
+func TestValidAmpResponseWhenRequestRejected(t *testing.T) {
+	nbr := openrtb3.NoBidReason(123)
+	reject := hookexecution.RejectError{
+		int(nbr),
+		hookexecution.HookID{"foobar", "foo"},
+		hooks.StageEntrypoint.String(),
+	}
+
+	testCases := []struct {
+		description         string
+		expectedAmpResponse AmpResponse
+		hookExecutor        hookexecution.HookStageExecutor
+	}{
+		{
+			"Assert correct AmpResponse when request rejected at entrypoint stage",
+			AmpResponse{Targeting: map[string]string{}},
+			rejectableHookExecutor{entrypointReject: &reject},
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.description, func(t *testing.T) {
+			actualAmpObject := analytics.AmpObject{}
+			logger := newMockLogger(&actualAmpObject)
+			stored := map[string]json.RawMessage{
+				"1": json.RawMessage(validRequest(t, "site.json")),
+			}
+
+			deps := &endpointDeps{
+				fakeUUIDGenerator{},
+				&nobidExchange{},
+				mockBidderParamValidator{},
+				&mockAmpStoredReqFetcher{stored},
+				empty_fetcher.EmptyFetcher{},
+				empty_fetcher.EmptyFetcher{},
+				&config.Configuration{MaxRequestSize: maxSize},
+				&metricsConfig.NilMetricsEngine{},
+				logger,
+				map[string]string{},
+				false,
+				[]byte{},
+				openrtb_ext.BuildBidderMap(),
+				nil,
+				nil,
+				hardcodedResponseIPValidator{response: true},
+				empty_fetcher.EmptyFetcher{},
+				test.hookExecutor,
+			}
+
+			req := httptest.NewRequest("POST", "/openrtb2/amp?tag_id=1", nil)
+			recorder := httptest.NewRecorder()
+
+			deps.AmpAuction(recorder, req, nil)
+			assert.Equal(t, recorder.Code, http.StatusOK, "Endpoint should return 200 OK.")
+
+			resp := AmpResponse{}
+			respBytes := recorder.Body.Bytes()
+			err := json.Unmarshal(respBytes, &resp)
+
+			assert.NoError(t, err, "Unable to unmarshal response.")
+			assert.Equal(t, test.expectedAmpResponse, resp)
+			assert.Contains(t, actualAmpObject.Errors, reject, "Reject error is not logged to analytics.")
+		})
 	}
 }
